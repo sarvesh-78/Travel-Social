@@ -17,6 +17,7 @@ interface Post {
   };
   comments: Comment[];
   user_vote?: 'up' | 'down' | null;
+  image_url?: string;
 }
 
 interface Comment {
@@ -34,6 +35,7 @@ export function Posts() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [newPost, setNewPost] = useState({
     title: '',
     content: '',
@@ -119,22 +121,46 @@ export function Posts() {
     e.preventDefault();
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('No user found');
-
+      if (!user) throw new Error('Not logged in');
+  
+      let image_url = '';
+  
+      if (imageFile) {
+        const fileExt = imageFile.name.split('.').pop();
+        const fileName = `${Date.now()}-${user.id}.${fileExt}`;
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('post-images')
+          .upload(fileName, imageFile);
+  
+        if (uploadError) throw uploadError;
+  
+        const { data: publicURLData } = supabase.storage
+          .from('post-images')
+          .getPublicUrl(fileName);
+  
+        image_url = publicURLData.publicUrl;
+      }
+  
       const { error } = await supabase.from('posts').insert([{
         ...newPost,
         city_id: cityId,
         author_id: user.id,
+        upvotes: 0,
+        downvotes: 0,
+        image_url,
       }]);
-
+  
       if (error) throw error;
-      setShowAddForm(false);
+  
       setNewPost({ title: '', content: '', flair: 'food_spot' });
+      setImageFile(null);
+      setShowAddForm(false);
       fetchPosts();
     } catch (error) {
-      console.error('Error adding post:', error);
+      console.error('Post add error:', error);
     }
   }
+  
 
   async function handleAddComment(postId: string) {
     try {
@@ -272,6 +298,23 @@ export function Posts() {
                 <option value="tip">Tip</option>
               </select>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Image</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) setImageFile(file);
+                }}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              />
+              {imageFile && (
+                <div className="mt-2 text-sm text-gray-500">
+                  Selected file: {imageFile.name}
+                </div>
+              )}
+            </div>
           </div>
           <div className="mt-4 flex justify-end space-x-3">
             <button
@@ -313,6 +356,15 @@ export function Posts() {
                 </span>
               </div>
               <p className="text-gray-600">{post.content}</p>
+
+              {post.image_url && (
+                <img
+                  src={post.image_url}
+                  alt="Post visual"
+                  className="mt-4 max-h-96 w-full object-cover rounded-lg"
+                />
+              )}
+
               <div className="mt-4 flex items-center space-x-4">
                 <button 
                   onClick={() => handleVote(post.id, 'up')}
