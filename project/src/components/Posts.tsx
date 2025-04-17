@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { MessageSquare, ThumbsUp, ThumbsDown, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface Post {
@@ -14,10 +14,11 @@ interface Post {
   author: {
     username: string;
     role: string;
+    id: string;
   };
   comments: Comment[];
-  user_vote?: 'up' | 'down' | null;
   image_url?: string;
+  user_vote?: 'up' | 'down';
 }
 
 interface Comment {
@@ -42,8 +43,25 @@ export function Posts() {
     flair: 'food_spot',
   });
   const [cityName, setCityName] = useState('');
-  const [commentContent, setCommentContent] = useState<{ [key: string]: string }>({});
-  const [showComments, setShowComments] = useState<{ [key: string]: boolean }>({});
+  const [user, setUser] = useState<any>(null);
+  const [newComment, setNewComment] = useState<{ [postId: string]: string }>({});
+  const [commentContent, setCommentContent] = useState<{ [postId: string]: string }>({});
+
+  useEffect(() => {
+    async function fetchUser() {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error) {
+        console.error('Error fetching user:', error);
+        return;
+      }
+      if (!user) {
+        window.location.href = '/login'; // Redirect to login page
+      } else {
+        setUser(user);
+      }
+    }
+    fetchUser();
+  }, []);
 
   useEffect(() => {
     fetchCityName();
@@ -69,13 +87,11 @@ export function Posts() {
   async function fetchPosts() {
     if (!cityId) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-
       const { data: postsData, error: postsError } = await supabase
         .from('posts')
         .select(`
           *,
-          author:profiles!posts_author_id_fkey(username, role),
+          author:profiles!posts_author_id_fkey(username, role, id),
           comments(
             id,
             content,
@@ -88,28 +104,7 @@ export function Posts() {
 
       if (postsError) throw postsError;
 
-      // Fetch user's votes if logged in
-      if (user && postsData) {
-        const { data: votesData, error: votesError } = await supabase
-          .from('post_votes')
-          .select('post_id, vote_type')
-          .eq('user_id', user.id)
-          .in('post_id', postsData.map(post => post.id));
-
-        if (votesError) throw votesError;
-
-        const votesMap = (votesData || []).reduce((acc, vote) => ({
-          ...acc,
-          [vote.post_id]: vote.vote_type,
-        }), {});
-
-        setPosts(postsData.map(post => ({
-          ...post,
-          user_vote: votesMap[post.id] || null,
-        })));
-      } else {
-        setPosts(postsData || []);
-      }
+      setPosts(postsData || []);
     } catch (error) {
       console.error('Error fetching posts:', error);
     } finally {
@@ -122,45 +117,77 @@ export function Posts() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not logged in');
-  
-      let image_url = '';
-  
+
+      let imageUrl = null;
       if (imageFile) {
         const fileExt = imageFile.name.split('.').pop();
-        const fileName = `${Date.now()}-${user.id}.${fileExt}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
+        const fileName = `${Date.now()}.${fileExt}`;
+        const filePath = `posts/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
           .from('post-images')
-          .upload(fileName, imageFile);
-  
+          .upload(filePath, imageFile);
+
         if (uploadError) throw uploadError;
-  
-        const { data: publicURLData } = supabase.storage
+
+        const { data } = supabase.storage
           .from('post-images')
-          .getPublicUrl(fileName);
-  
-        image_url = publicURLData.publicUrl;
+          .getPublicUrl(filePath);
+
+        imageUrl = data.publicUrl;
       }
-  
-      const { error } = await supabase.from('posts').insert([{
-        ...newPost,
+
+      const { error } = await supabase.from('posts').insert({
+        title: newPost.title,
+        content: newPost.content,
+        flair: newPost.flair,
         city_id: cityId,
         author_id: user.id,
-        upvotes: 0,
-        downvotes: 0,
-        image_url,
-      }]);
-  
+        image_url: imageUrl,
+      });
+
       if (error) throw error;
-  
-      setNewPost({ title: '', content: '', flair: 'food_spot' });
-      setImageFile(null);
-      setShowAddForm(false);
+
+      // Refresh posts and reset form
       fetchPosts();
+      setShowAddForm(false);
+      setNewPost({
+        title: '',
+        content: '',
+        flair: 'food_spot',
+      });
+      setImageFile(null);
     } catch (error) {
-      console.error('Post add error:', error);
+      console.error('Error adding post:', error);
     }
   }
-  
+
+  async function handleDeletePost(postId: string) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not logged in');
+
+      console.log('Deleting post with ID:', postId);
+
+      // Find the post in the array
+      const post = posts.find(p => p.id === postId);
+      if (!post) throw new Error('Post not found');
+
+      // Check if the logged-in user is the author of the post
+      if (post.author.id !== user.id) {
+        throw new Error('You can only delete your own posts');
+      }
+
+      // Delete the post from the posts table
+      const { error } = await supabase.from('posts').delete().eq('id', postId);
+      if (error) throw error;
+
+      // Refresh the list of posts after deletion
+      setPosts(posts.filter(p => p.id !== postId));
+    } catch (error) {
+      console.error('Error deleting post:', error);
+    }
+  }
 
   async function handleAddComment(postId: string) {
     try {
@@ -178,7 +205,7 @@ export function Posts() {
 
       if (error) throw error;
       setCommentContent({ ...commentContent, [postId]: '' });
-      fetchPosts();
+      fetchPosts(); // Refresh posts to show the new comment
     } catch (error) {
       console.error('Error adding comment:', error);
     }
@@ -192,17 +219,55 @@ export function Posts() {
       const post = posts.find(p => p.id === postId);
       if (!post) return;
 
-      const isRemovingVote = post.user_vote === voteType;
+      // Fetch the user's existing vote for this post
+      const { data: existingVote, error: fetchError } = await supabase
+        .from('post_votes')
+        .select('vote_type')
+        .eq('user_id', user.id)
+        .eq('post_id', postId)
+        .single();
 
-      // Update the post_votes table
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        // Ignore "No rows found" error (code PGRST116), handle other errors
+        console.error('Error fetching existing vote:', fetchError);
+        return;
+      }
+
+      const isRemovingVote = existingVote?.vote_type === voteType; // Check if the user is removing their vote
+
       if (isRemovingVote) {
-        await supabase
+        // Remove the vote
+        const { error: deleteError } = await supabase
           .from('post_votes')
           .delete()
           .eq('user_id', user.id)
           .eq('post_id', postId);
+
+        if (deleteError) {
+          console.error('Error removing vote:', deleteError);
+          return;
+        }
+
+        // Update the posts table vote counts
+        const updates = {
+          [voteType === 'up' ? 'upvotes' : 'downvotes']: Math.max(
+            voteType === 'up' ? post.upvotes - 1 : post.downvotes - 1,
+            0
+          ),
+        };
+
+        const { error: updateError } = await supabase
+          .from('posts')
+          .update(updates)
+          .eq('id', postId);
+
+        if (updateError) {
+          console.error('Error updating post votes:', updateError);
+          return;
+        }
       } else {
-        await supabase
+        // Add or switch the vote
+        const { error: upsertError } = await supabase
           .from('post_votes')
           .upsert({
             user_id: user.id,
@@ -211,33 +276,46 @@ export function Posts() {
           }, {
             onConflict: 'user_id,post_id',
           });
+
+        if (upsertError) {
+          console.error('Error upserting vote:', upsertError);
+          return;
+        }
+
+        // Update the posts table vote counts
+        const updates: any = {};
+        if (existingVote?.vote_type === 'up' && voteType === 'down') {
+          // Switch from upvote to downvote
+          updates.upvotes = Math.max(post.upvotes - 1, 0);
+          updates.downvotes = post.downvotes + 1;
+        } else if (existingVote?.vote_type === 'down' && voteType === 'up') {
+          // Switch from downvote to upvote
+          updates.upvotes = post.upvotes + 1;
+          updates.downvotes = Math.max(post.downvotes - 1, 0);
+        } else {
+          // New vote
+          updates[voteType === 'up' ? 'upvotes' : 'downvotes'] = voteType === 'up' ? post.upvotes + 1 : post.downvotes + 1;
+        }
+
+        const { error: updateError } = await supabase
+          .from('posts')
+          .update(updates)
+          .eq('id', postId);
+
+        if (updateError) {
+          console.error('Error updating post votes:', updateError);
+          return;
+        }
       }
 
-      // Update the posts table vote counts
-      const updates: any = {};
-      if (post.user_vote === 'up' && voteType === 'down') {
-        updates.upvotes = post.upvotes - 1;
-        updates.downvotes = post.downvotes + 1;
-      } else if (post.user_vote === 'down' && voteType === 'up') {
-        updates.upvotes = post.upvotes + 1;
-        updates.downvotes = post.downvotes - 1;
-      } else if (isRemovingVote) {
-        updates[voteType === 'up' ? 'upvotes' : 'downvotes'] = 
-          voteType === 'up' ? post.upvotes - 1 : post.downvotes - 1;
-      } else {
-        updates[voteType === 'up' ? 'upvotes' : 'downvotes'] = 
-          voteType === 'up' ? post.upvotes + 1 : post.downvotes + 1;
-      }
-
-      await supabase
-        .from('posts')
-        .update(updates)
-        .eq('id', postId);
-
-      fetchPosts();
+      fetchPosts(); // Refresh posts to reflect the updated votes
     } catch (error) {
       console.error('Error voting:', error);
     }
+  }
+
+  if (!user) {
+    return <div>Loading user...</div>;
   }
 
   if (loading) {
@@ -261,76 +339,42 @@ export function Posts() {
       </div>
 
       {showAddForm && (
-        <form onSubmit={handleAddPost} className="bg-white p-6 rounded-lg shadow">
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Title</label>
-              <input
-                type="text"
-                required
-                value={newPost.title}
-                onChange={(e) => setNewPost({ ...newPost, title: e.target.value })}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Content</label>
-              <textarea
-                required
-                value={newPost.content}
-                onChange={(e) => setNewPost({ ...newPost, content: e.target.value })}
-                rows={4}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Flair</label>
-              <select
-                value={newPost.flair}
-                onChange={(e) => setNewPost({ ...newPost, flair: e.target.value })}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-              >
-                <option value="food_spot">Food Spot</option>
-                <option value="hidden_gem">Hidden Gem</option>
-                <option value="travel_plan">Travel Plan</option>
-                <option value="question">Question</option>
-                <option value="review">Review</option>
-                <option value="tip">Tip</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Image</label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) setImageFile(file);
-                }}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-              />
-              {imageFile && (
-                <div className="mt-2 text-sm text-gray-500">
-                  Selected file: {imageFile.name}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="mt-4 flex justify-end space-x-3">
-            <button
-              type="button"
-              onClick={() => setShowAddForm(false)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
-            >
-              Post
-            </button>
-          </div>
+        <form onSubmit={handleAddPost} className="bg-white p-6 rounded-lg shadow space-y-4">
+          <input
+            type="text"
+            placeholder="Title"
+            className="w-full p-2 border rounded"
+            required
+            value={newPost.title}
+            onChange={(e) => setNewPost({ ...newPost, title: e.target.value })}
+          />
+          <textarea
+            placeholder="Content"
+            className="w-full p-2 border rounded"
+            required
+            value={newPost.content}
+            onChange={(e) => setNewPost({ ...newPost, content: e.target.value })}
+          />
+          <select
+            className="w-full p-2 border rounded"
+            value={newPost.flair}
+            onChange={(e) => setNewPost({ ...newPost, flair: e.target.value })}
+          >
+            <option value="food_spot">Food Spot</option>
+            <option value="travel_tip">Travel Tip</option>
+            <option value="local_event">Local Event</option>
+          </select>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+          />
+          <button
+            type="submit"
+            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+          >
+            Add Post
+          </button>
         </form>
       )}
 
@@ -354,84 +398,68 @@ export function Posts() {
                 <span className="px-3 py-1 text-sm font-medium text-indigo-600 bg-indigo-100 rounded-full">
                   {post.flair.replace('_', ' ')}
                 </span>
+                {user && post.author.id === user.id && (
+                  <button
+                    onClick={() => handleDeletePost(post.id)}
+                    className="px-3 py-1 text-sm font-medium text-red-600 hover:text-red-800"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
               <p className="text-gray-600">{post.content}</p>
+              {post.image_url && <img src={post.image_url} alt={post.title} className="mt-4 w-full h-auto" />}
 
-              {post.image_url && (
-                <img
-                  src={post.image_url}
-                  alt="Post visual"
-                  className="mt-4 max-h-96 w-full object-cover rounded-lg"
-                />
-              )}
-
-              <div className="mt-4 flex items-center space-x-4">
-                <button 
+              <div className="flex space-x-4 mt-4">
+                <button
                   onClick={() => handleVote(post.id, 'up')}
-                  className={`flex items-center ${
-                    post.user_vote === 'up' ? 'text-indigo-600' : 'text-gray-500 hover:text-indigo-600'
-                  }`}
+                  className={`px-4 py-2 rounded ${post.user_vote === 'up' ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
                 >
-                  <ThumbsUp className="h-5 w-5 mr-1" />
-                  <span>{post.upvotes}</span>
+                  Upvote ({post.upvotes})
                 </button>
-                <button 
+                <button
                   onClick={() => handleVote(post.id, 'down')}
-                  className={`flex items-center ${
-                    post.user_vote === 'down' ? 'text-red-600' : 'text-gray-500 hover:text-red-600'
-                  }`}
+                  className={`px-4 py-2 rounded ${post.user_vote === 'down' ? 'bg-red-700 text-white' : 'bg-red-600 text-white hover:bg-red-700'}`}
                 >
-                  <ThumbsDown className="h-5 w-5 mr-1" />
-                  <span>{post.downvotes}</span>
-                </button>
-                <button 
-                  onClick={() => setShowComments({ ...showComments, [post.id]: !showComments[post.id] })}
-                  className="flex items-center text-gray-500 hover:text-indigo-600"
-                >
-                  <MessageSquare className="h-5 w-5 mr-1" />
-                  <span>{post.comments.length} Comments</span>
+                  Downvote ({post.downvotes})
                 </button>
               </div>
-            </div>
 
-            {showComments[post.id] && (
-              <div className="border-t border-gray-200 p-6 space-y-4">
-                <div className="space-y-4">
-                  {post.comments.map((comment) => (
-                    <div key={comment.id} className="pl-4 border-l-2 border-gray-200">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-medium text-gray-900">
-                          {comment.author.username}
-                        </span>
-                        <span className="text-sm text-gray-500">
-                          {new Date(comment.created_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-gray-600">{comment.content}</p>
+              {/* Comments Section */}
+              <div className="mt-4">
+                <h4 className="text-lg font-semibold">Comments:</h4>
+                {post.comments.length === 0 ? (
+                  <p>No comments yet.</p>
+                ) : (
+                  post.comments.map((comment) => (
+                    <div key={comment.id} className="mt-2">
+                      <p>
+                        <strong>{comment.author.username}:</strong> {comment.content}
+                      </p>
                     </div>
-                  ))}
-                </div>
+                  ))
+                )}
 
-                <div className="mt-4 flex space-x-2">
+                {/* Add Comment Input */}
+                <div className="mt-4 flex items-center space-x-2">
                   <input
                     type="text"
-                    value={commentContent[post.id] || ''}
-                    onChange={(e) => setCommentContent({ 
-                      ...commentContent, 
-                      [post.id]: e.target.value 
-                    })}
                     placeholder="Add a comment..."
-                    className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    value={commentContent[post.id] || ''}
+                    onChange={(e) =>
+                      setCommentContent({ ...commentContent, [post.id]: e.target.value })
+                    }
+                    className="flex-1 p-2 border rounded"
                   />
                   <button
                     onClick={() => handleAddComment(post.id)}
-                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
+                    className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
                   >
                     Comment
                   </button>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         ))}
       </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Calendar, MapPin, MessageSquare, Plus, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import CommunityWiki from './CommunityWiki';
 
 interface TravelPlan {
   id: string;
@@ -133,6 +134,7 @@ export function TravelPlans() {
 
   return (
     <div className="space-y-6">
+        <CommunityWiki />
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-900">Travel Plans</h2>
         <button

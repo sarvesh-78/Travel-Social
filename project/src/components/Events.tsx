@@ -56,6 +56,19 @@ export function Events() {
   });
   const [userRsvpStatus, setUserRsvpStatus] = useState<{ [eventId: string]: 'going' | 'interested' | 'none' }>({});
   const [newComment, setNewComment] = useState<{ [eventId: string]: string }>({});
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    async function fetchUser() {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error) {
+        console.error('Error fetching user:', error);
+        return;
+      }
+      setUser(user);
+    }
+    fetchUser();
+  }, []);
 
   useEffect(() => {
     fetchEvents();
@@ -218,6 +231,30 @@ export function Events() {
     }
   }
 
+  async function handleDeleteEvent(eventId: string) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not logged in');
+
+      // Find the event in the array
+      const event = events.find(e => e.id === eventId);
+      if (!event) throw new Error('Event not found');
+
+      // Check if the logged-in user is the creator of the event
+      if (event.added_by !== user.id) {
+        throw new Error('You can only delete your own events');
+      }
+
+      const { error } = await supabase.from('events').delete().eq('id', eventId);
+      if (error) throw error;
+
+      // Refresh the list of events after deletion
+      setEvents(events.filter(e => e.id !== eventId));
+    } catch (error) {
+      console.error('Error deleting event:', error);
+    }
+  }
+
   if (loading) return <div>Loading events...</div>;
 
   return (
@@ -325,6 +362,17 @@ export function Events() {
                   </button>
                 )}
               </div>
+
+              {/* Delete button (only for the creator of the event) */}
+              {event.added_by === user?.id && (
+                <button
+                  onClick={() => handleDeleteEvent(event.id)}
+                  className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                >
+                  Delete Event
+                </button>
+              )}
+
               <div className="mt-4">
                 <h4 className="text-lg font-semibold">Discussions:</h4>
                 {event.discussions.length === 0 ? (

@@ -12,22 +12,30 @@ import { User } from '@supabase/supabase-js';
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true); // Loading state to prevent rendering before session check
 
   useEffect(() => {
-    // Check active sessions and sets the user
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Check if there's an active session when the component mounts
+    const fetchSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user ?? null);
-    });
+      setLoading(false);
+    };
 
-    // Listen for changes on auth state (sign in, sign out, etc.)
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    fetchSession();
+
+    // Listen for authentication state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  if (loading) {
+    return <div>Loading...</div>; // Show loading state until user session is resolved
+  }
 
   return (
     <Router>
@@ -43,6 +51,7 @@ function App() {
                     <Auth />
                   </div>
                 ) : (
+                  // Ensure correct redirect behavior
                   <Navigate to="/cities" replace />
                 )
               }
