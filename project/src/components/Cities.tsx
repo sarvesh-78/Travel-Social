@@ -179,6 +179,12 @@ export function Cities() {
                   >
                     Events
                   </button>
+                  <button
+                    onClick={() => navigate(`/cities/${city.id}/travel-plans`)}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-white bg-yellow-600 rounded-md hover:bg-yellow-700"
+                  >
+                    Travel Plans
+                  </button>
                 </div>
               </div>
             </div>

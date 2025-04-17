@@ -16,6 +16,7 @@ interface Event {
   tags: string[];
   max_attendees: number;
   added_by: string;
+  image_url?: string;
   rsvps: {
     status: string;
     user: {
@@ -51,18 +52,15 @@ export function Events() {
     location_lng: 0,
     tags: [] as string[],
     max_attendees: 0,
+    image: null as File | null,
   });
-  const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
-  const [discussion, setDiscussion] = useState('');
-
-  // This will hold the RSVP status for each event for the logged-in user
   const [userRsvpStatus, setUserRsvpStatus] = useState<{ [eventId: string]: 'going' | 'interested' | 'none' }>({});
+  const [newComment, setNewComment] = useState<{ [eventId: string]: string }>({});
 
   useEffect(() => {
     fetchEvents();
   }, [cityId]);
 
-  // Fetch events and the user's RSVP status
   async function fetchEvents() {
     try {
       const { data, error } = await supabase
@@ -85,7 +83,6 @@ export function Events() {
 
       if (error) throw error;
 
-      // Setting the RSVP status for the logged-in user
       const user = await supabase.auth.getUser();
       const userId = user?.data?.user?.id;
       const rsvpStatus: { [eventId: string]: 'going' | 'interested' | 'none' } = {};
@@ -93,11 +90,7 @@ export function Events() {
       if (userId && data) {
         data.forEach((event: Event) => {
           const userRsvp = event.rsvps.find(rsvp => rsvp.user.username === userId);
-          if (userRsvp) {
-            rsvpStatus[event.id] = userRsvp.status as 'going' | 'interested';
-          } else {
-            rsvpStatus[event.id] = 'none';
-          }
+          rsvpStatus[event.id] = userRsvp?.status as 'going' | 'interested' || 'none';
         });
       }
 
@@ -114,25 +107,19 @@ export function Events() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user found');
-  
+
       if (status === 'none') {
-        const { error } = await supabase.from('event_rsvps').delete().match({
-          event_id: eventId,
-          user_id: user.id,
-        });
-        if (error) throw error;
+        await supabase.from('event_rsvps').delete().match({ event_id: eventId, user_id: user.id });
       } else {
-        const { error } = await supabase.from('event_rsvps').upsert({
+        await supabase.from('event_rsvps').upsert({
           event_id: eventId,
           user_id: user.id,
           status,
         }, {
           onConflict: 'event_id,user_id',
         });
-        if (error) throw error;
       }
-  
-      // 👇 Immediately update RSVP status locally for instant UI feedback
+
       setUserRsvpStatus(prev => ({
         ...prev,
         [eventId]: status,
@@ -142,9 +129,96 @@ export function Events() {
     }
   }
 
-  if (loading) {
-    return <div>Loading events...</div>;
+  async function handleAddEvent(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user found');
+
+      let imageUrl = null;
+      if (newEvent.image) {
+        const fileExt = newEvent.image.name.split('.').pop();
+        const fileName = `${Date.now()}.${fileExt}`;
+        const filePath = `events/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('post-images')
+          .upload(filePath, newEvent.image);
+
+        if (uploadError) throw uploadError;
+
+        const { data } = supabase.storage
+          .from('post-images')
+          .getPublicUrl(filePath);
+
+        imageUrl = data.publicUrl;
+      }
+
+      // Insert the event into the database
+      const { error } = await supabase.from('events').insert({
+        city_id: cityId,
+        title: newEvent.title,
+        description: newEvent.description || null,
+        date: newEvent.date.toISOString(),
+        added_by: user.id,
+        location_name: newEvent.location_name || null,
+        location_address: newEvent.location_address || null,
+        location_lat: newEvent.location_lat || null,
+        location_lng: newEvent.location_lng || null,
+        tags: newEvent.tags || [],
+        max_attendees: newEvent.max_attendees || null,
+        image_url: imageUrl,
+      });
+
+      if (error) throw error;
+
+      // Refresh events and reset form
+      fetchEvents();
+      setShowAddForm(false);
+      setNewEvent({
+        title: '',
+        description: '',
+        date: new Date(),
+        location_name: '',
+        location_address: '',
+        location_lat: 0,
+        location_lng: 0,
+        tags: [],
+        max_attendees: 0,
+        image: null,
+      });
+    } catch (error) {
+      console.error('Error adding event:', error);
+    }
   }
+
+  async function handleAddComment(eventId: string) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user found');
+
+      const content = newComment[eventId];
+      if (!content) return;
+
+      const { error } = await supabase.from('event_discussions').insert({
+        event_id: eventId,
+        content,
+        author_id: user.id,
+      });
+
+      if (error) throw error;
+
+      // Refresh events to show the new comment
+      fetchEvents();
+
+      // Clear the comment input for this event
+      setNewComment((prev) => ({ ...prev, [eventId]: '' }));
+    } catch (error) {
+      console.error('Error adding comment:', error);
+    }
+  }
+
+  if (loading) return <div>Loading events...</div>;
 
   return (
     <div className="space-y-6">
@@ -154,13 +228,56 @@ export function Events() {
           onClick={() => setShowAddForm(!showAddForm)}
           className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
         >
-          Create Event
+          {showAddForm ? 'Cancel' : 'Create Event'}
         </button>
       </div>
 
       {showAddForm && (
         <form onSubmit={handleAddEvent} className="bg-white p-6 rounded-lg shadow space-y-4">
-          {/* Form Fields here */}
+          <input type="text" placeholder="Title" className="w-full p-2 border rounded" required
+            value={newEvent.title} onChange={e => setNewEvent({ ...newEvent, title: e.target.value })} />
+
+          <textarea placeholder="Description" className="w-full p-2 border rounded" required
+            value={newEvent.description} onChange={e => setNewEvent({ ...newEvent, description: e.target.value })} />
+
+          <div>
+            <label className="block text-sm font-medium">Event Date</label>
+            <DatePicker
+              selected={newEvent.date}
+              onChange={date => date && setNewEvent({ ...newEvent, date })}
+              className="w-full p-2 border rounded"
+            />
+          </div>
+
+          <input type="text" placeholder="Location Name" className="w-full p-2 border rounded"
+            value={newEvent.location_name} onChange={e => setNewEvent({ ...newEvent, location_name: e.target.value })} />
+          <input type="text" placeholder="Location Address" className="w-full p-2 border rounded"
+            value={newEvent.location_address} onChange={e => setNewEvent({ ...newEvent, location_address: e.target.value })} />
+
+          <div>
+            <label className="block text-sm font-medium">Event Tags</label>
+            <select
+              multiple
+              className="w-full p-2 border rounded"
+              value={newEvent.tags}
+              onChange={e => setNewEvent({ ...newEvent, tags: Array.from(e.target.selectedOptions, option => option.value) })}
+            >
+              <option value="festival">Festival</option>
+              <option value="meetup">Meetup</option>
+              <option value="local_experience">Local Experience</option>
+              <option value="food">Food</option>
+              <option value="culture">Culture</option>
+              <option value="outdoor">Outdoor</option>
+            </select>
+          </div>
+
+          <input type="file" accept="image/*"
+            onChange={e => setNewEvent({ ...newEvent, image: e.target.files?.[0] || null })}
+          />
+
+          <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+            Add Event
+          </button>
         </form>
       )}
 
@@ -170,65 +287,76 @@ export function Events() {
         ) : (
           events.map((event) => (
             <div key={event.id} className="bg-white p-6 rounded-lg shadow">
-              <h3 className="text-xl font-bold text-gray-900">{event.title}</h3>
-              <p className="text-sm text-gray-500">{event.date}</p>
-              <p className="mt-2 text-gray-700">{event.description}</p>
-              <div className="mt-2">
-                <strong>Tags:</strong> {event.tags.join(', ')}
-              </div>
+              <h3 className="text-xl font-semibold">{event.title}</h3>
+              <p className="text-sm text-gray-500">{new Date(event.date).toLocaleDateString()}</p>
 
-              <div className="mt-4">
-                {userRsvpStatus[event.id] === 'going' ? (
-                  <button
-                    onClick={() => handleRSVP(event.id, 'none')}
-                    className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700"
-                  >
-                    Cancel RSVP
-                  </button>
-                ) : userRsvpStatus[event.id] === 'interested' ? (
-                  <button
-                    onClick={() => handleRSVP(event.id, 'none')}
-                    className="px-4 py-2 text-sm font-medium text-white bg-yellow-600 rounded-md hover:bg-yellow-700"
-                  >
-                    Cancel RSVP
-                  </button>
-                ) : (
+              {/* Display event image if available */}
+              {event.image_url && (
+                <img
+                  src={event.image_url}
+                  alt={event.title}
+                  className="w-full h-64 object-cover rounded-lg mb-4"
+                />
+              )}
+
+              <p>{event.description}</p>
+              <div className="space-x-4 mt-4">
+                {userRsvpStatus[event.id] === 'none' ? (
                   <>
                     <button
                       onClick={() => handleRSVP(event.id, 'going')}
-                      className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                     >
-                      RSVP as Going
+                      Going
                     </button>
                     <button
                       onClick={() => handleRSVP(event.id, 'interested')}
-                      className="ml-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                      className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
                     >
-                      RSVP as Interested
+                      Interested
                     </button>
                   </>
+                ) : (
+                  <button
+                    onClick={() => handleRSVP(event.id, 'none')}
+                    className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                  >
+                    Leave
+                  </button>
                 )}
               </div>
-
               <div className="mt-4">
-                <div className="text-sm font-semibold">Discussion:</div>
-                {event.discussions.map((discussion) => (
-                  <div key={discussion.id} className="text-sm text-gray-700 mt-2">
-                    <strong>{discussion.author.username}:</strong> {discussion.content}
-                  </div>
-                ))}
-                <textarea
-                  value={discussion}
-                  onChange={(e) => setDiscussion(e.target.value)}
-                  className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  placeholder="Add your comment"
-                />
-                <button
-                  onClick={() => handleAddDiscussion(event.id)}
-                  className="mt-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-                >
-                  Add Discussion
-                </button>
+                <h4 className="text-lg font-semibold">Discussions:</h4>
+                {event.discussions.length === 0 ? (
+                  <p>No discussions yet.</p>
+                ) : (
+                  event.discussions.map((discussion) => (
+                    <div key={discussion.id} className="mt-2">
+                      <p>
+                        <strong>{discussion.author.username}:</strong> {discussion.content}
+                      </p>
+                    </div>
+                  ))
+                )}
+
+                {/* Add new comment input */}
+                <div className="mt-4 flex items-center space-x-2">
+                  <input
+                    type="text"
+                    placeholder="Add a comment..."
+                    value={newComment[event.id] || ''}
+                    onChange={(e) =>
+                      setNewComment({ ...newComment, [event.id]: e.target.value })
+                    }
+                    className="flex-1 p-2 border rounded"
+                  />
+                  <button
+                    onClick={() => handleAddComment(event.id)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                  >
+                    Comment
+                  </button>
+                </div>
               </div>
             </div>
           ))
@@ -237,4 +365,3 @@ export function Events() {
     </div>
   );
 }
-

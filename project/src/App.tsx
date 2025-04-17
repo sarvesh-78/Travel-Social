@@ -5,6 +5,7 @@ import { Navigation } from './components/Navigation';
 import { Cities } from './components/Cities';
 import { Posts } from './components/Posts';
 import { Events } from './components/Events';
+import { TravelPlans } from './components/TravelPlans';
 import { Profile } from './components/Profile';
 import { supabase } from './lib/supabase';
 import { User } from '@supabase/supabase-js';
@@ -57,6 +58,10 @@ function App() {
             <Route
               path="/cities/:cityId/events"
               element={user ? <Events /> : <Navigate to="/" replace />}
+            />
+            <Route
+              path="/cities/:cityId/travel-plans"
+              element={user ? <TravelPlans /> : <Navigate to="/" replace />}
             />
             <Route
               path="/profile"
