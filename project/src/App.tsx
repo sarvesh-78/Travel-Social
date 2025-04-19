@@ -5,7 +5,10 @@ import { Navigation } from './components/Navigation';
 import { Cities } from './components/Cities';
 import { Posts } from './components/Posts';
 import { Events } from './components/Events';
+import { Hotel } from './components/Hotel';
 import { TravelPlans } from './components/TravelPlans';
+import { TravelVlogs } from './components/TravelVlogs';
+import Transport from './components/transport.tsx';
 import { Profile } from './components/Profile';
 import { supabase } from './lib/supabase';
 import { User } from '@supabase/supabase-js';
@@ -61,6 +64,10 @@ function App() {
               element={user ? <Cities /> : <Navigate to="/" replace />}
             />
             <Route
+              path="/vlogs"
+              element={user ? <TravelVlogs /> : <Navigate to="/" replace />}
+            />
+            <Route
               path="/cities/:cityId/posts"
               element={user ? <Posts /> : <Navigate to="/" replace />}
             />
@@ -72,6 +79,15 @@ function App() {
               path="/cities/:cityId/travel-plans"
               element={user ? <TravelPlans /> : <Navigate to="/" replace />}
             />
+            <Route
+              path="/cities/:cityId/hotels"
+              element={user ? <Hotel /> : <Navigate to="/" replace />}
+            />
+            <Route
+              path="/cities/:cityId/transport"
+              element={user ? <Transport /> : <Navigate to="/" replace />}
+            />
+
             <Route
               path="/profile"
               element={user ? <Profile user={user} /> : <Navigate to="/" replace />}

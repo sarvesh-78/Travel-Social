@@ -6,6 +6,7 @@ const SECTIONS = [
   "best_time_to_visit",
   "safety",
   "most_efficient_local_transport",
+  "question_of_the_week",
 ];
 
 type WikiEntry = {
@@ -33,8 +34,6 @@ const CommunityWiki = () => {
         return;
       }
 
-      console.log("City ID:", cityId);
-
       const { data, error } = await supabase
         .from("community_wiki")
         .select("*")
@@ -44,6 +43,7 @@ const CommunityWiki = () => {
         console.error("Error fetching wiki:", error);
         return;
       }
+
 
       const map: Record<string, WikiEntry | null> = {};
       for (const section of SECTIONS) {
@@ -78,14 +78,14 @@ const CommunityWiki = () => {
 
   return (
     <div className="p-4">
-      <h2 className="text-xl font-bold mb-4">🌐 Community Wiki</h2>
+      <h2 className="text-2xl font-bold mb-6">🌐 Community Wiki</h2>
 
       {SECTIONS.map((section) => {
         const entry = wikiData[section];
 
         return (
-          <div key={section} className="mb-6 border-b pb-4">
-            <h3 className="text-lg font-semibold capitalize">
+          <div key={section} className="mb-8 border-b pb-6">
+            <h3 className="text-xl font-semibold capitalize mb-2">
               {section.replace(/_/g, " ")}
             </h3>
 
@@ -95,20 +95,20 @@ const CommunityWiki = () => {
 
             {/* Poll UI */}
             {entry?.poll_question && (
-              <div className="mt-4">
-                <h4 className="font-medium">{entry.poll_question}</h4>
+              <div className="mt-6">
+                <h4 className="font-medium text-lg mb-4">{entry.poll_question}</h4>
                 {entry.poll_answers?.map((choice) => (
                   <div
                     key={choice}
-                    className="flex items-center justify-between mt-1"
+                    className="flex items-center justify-between p-3 mb-3 bg-gray-100 rounded-lg shadow-md hover:shadow-lg transition-shadow"
                   >
-                    <span>{choice}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-600">
+                    <span className="text-gray-800 font-medium">{choice}</span>
+                    <div className="flex items-center gap-4">
+                      <span className="text-gray-600 text-sm">
                         {entry.poll_votes?.[choice] || 0} votes
                       </span>
                       <button
-                        className="text-sm bg-gray-200 px-2 py-1 rounded"
+                        className="text-sm bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition"
                         onClick={() => handleVote(section, choice)}
                       >
                         Vote

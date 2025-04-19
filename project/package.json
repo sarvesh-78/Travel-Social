@@ -7,15 +7,24 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cors-proxy": "node ./node_modules/cors-anywhere/bin/cors-anywhere"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.7",
+    "axios": "^1.8.4",
+    "cors": "^2.8.5",
+    "cors-anywhere": "^0.4.4",
+    "crypto-js": "^4.2.0",
     "date-fns": "^4.1.0",
+    "express": "^5.1.0",
+    "leaflet": "^1.9.4",
     "lucide-react": "^0.344.0",
+    "node-fetch": "^3.3.2",
     "react": "^18.3.1",
     "react-datepicker": "^8.3.0",
     "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
     "react-router-dom": "^6.22.3"
   },
   "devDependencies": {
