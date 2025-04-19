@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, X, Upload } from 'lucide-react';
+import { Plus, X,ThumbsUp, ThumbsDown, MessageSquare, Upload } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface TravelVlog {
@@ -9,6 +9,8 @@ interface TravelVlog {
   video_url: string;
   thumbnail_url: string;
   created_at: string;
+  like_count: number;
+  dislike_count: number;
   author: {
     username: string;
     role: string;
@@ -17,6 +19,15 @@ interface TravelVlog {
     name: string;
     country: string;
   } | null;
+  user_reaction?: 'like' | 'dislike' | null;
+  comments: {
+    id: string;
+    content: string;
+    created_at: string;
+    author: {
+      username: string;
+    };
+  }[];
 }
 
 export function TravelVlogs() {
@@ -27,6 +38,8 @@ export function TravelVlogs() {
   const [cities, setCities] = useState<{ id: string; name: string; country: string }[]>([]);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [showComments, setShowComments] = useState<{ [key: string]: boolean }>({});
+  const [newComment, setNewComment] = useState<{ [key: string]: string }>({});
   const [newVlog, setNewVlog] = useState({
     title: '',
     description: '',
@@ -42,17 +55,44 @@ export function TravelVlogs() {
 
   async function fetchVlogs() {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
       const { data, error } = await supabase
         .from('travel_vlogs')
         .select(`
           *,
           author:profiles!travel_vlogs_user_id_fkey(username, role),
-          city:cities(name, country)
+          city:cities(name, country),comments:vlog_comments(
+            id,
+            content,
+            created_at,
+            author:profiles(username)
+          )
         `)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setVlogs(data || []);
+      if (user && data) {
+        // Fetch user's reactions
+        const { data: reactionsData, error: reactionsError } = await supabase
+          .from('vlog_reactions')
+          .select('vlog_id, reaction_type')
+          .eq('user_id', user.id)
+          .in('vlog_id', data.map(vlog => vlog.id));
+
+        if (reactionsError) throw reactionsError;
+
+        const reactionsMap = (reactionsData || []).reduce((acc, reaction) => ({
+          ...acc,
+          [reaction.vlog_id]: reaction.reaction_type,
+        }), {});
+
+        setVlogs(data.map(vlog => ({
+          ...vlog,
+          user_reaction: reactionsMap[vlog.id] || null,
+        })));
+      } else {
+        setVlogs(data || []);
+      }
     } catch (error) {
       console.error('Error fetching vlogs:', error);
     } finally {
@@ -151,6 +191,98 @@ export function TravelVlogs() {
       console.error('Error adding vlog:', error);
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleReaction(vlogId: string, reactionType: 'like' | 'dislike') {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const vlog = vlogs.find(v => v.id === vlogId);
+      if (!vlog) return;
+
+      const isRemovingReaction = vlog.user_reaction === reactionType;
+
+      if (isRemovingReaction) {
+        // Remove reaction
+        await supabase
+          .from('vlog_reactions')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('vlog_id', vlogId);
+
+        // Update counts
+        await supabase
+          .from('travel_vlogs')
+          .update({
+            [`${reactionType}_count`]: vlog[`${reactionType}_count`] - 1
+          })
+          .eq('id', vlogId);
+      } else {
+        // Remove existing reaction if any
+        if (vlog.user_reaction) {
+          await supabase
+            .from('vlog_reactions')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('vlog_id', vlogId);
+
+          // Decrement old reaction count
+          await supabase
+            .from('travel_vlogs')
+            .update({
+              [`${vlog.user_reaction}_count`]: vlog[`${vlog.user_reaction}_count`] - 1
+            })
+            .eq('id', vlogId);
+        }
+
+        // Add new reaction
+        await supabase
+          .from('vlog_reactions')
+          .insert({
+            user_id: user.id,
+            vlog_id: vlogId,
+            reaction_type: reactionType
+          });
+
+        // Increment new reaction count
+        await supabase
+          .from('travel_vlogs')
+          .update({
+            [`${reactionType}_count`]: vlog[`${reactionType}_count`] + 1
+          })
+          .eq('id', vlogId);
+      }
+
+      fetchVlogs();
+    } catch (error) {
+      console.error('Error handling reaction:', error);
+    }
+  }
+
+  async function handleAddComment(vlogId: string) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const content = newComment[vlogId];
+      if (!content?.trim()) return;
+
+      const { error } = await supabase
+        .from('vlog_comments')
+        .insert({
+          content: content.trim(),
+          vlog_id: vlogId,
+          user_id: user.id
+        });
+
+      if (error) throw error;
+
+      setNewComment({ ...newComment, [vlogId]: '' });
+      fetchVlogs();
+    } catch (error) {
+      console.error('Error adding comment:', error);
     }
   }
 
@@ -303,7 +435,7 @@ export function TravelVlogs() {
         </form>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 sm:grid-cols-2 gap-6">
         {vlogs.map((vlog) => (
           <div key={vlog.id} className="bg-white shadow rounded-lg overflow-hidden">
             <div className="aspect-w-16 aspect-h-9">
@@ -332,6 +464,67 @@ export function TravelVlogs() {
                 <p className="mt-1 text-sm text-gray-600">{vlog.description}</p>
               )}
               <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
+              <div className="mt-4 flex items-center space-x-4">
+                <button
+                  onClick={() => handleReaction(vlog.id, 'like')}
+                  className={`flex items-center space-x-1 ${
+                    vlog.user_reaction === 'like' ? 'text-green-600' : 'text-gray-500 hover:text-green-600'
+                  }`}
+                >
+                  <ThumbsUp className="h-5 w-5" />
+                  <span>{vlog.like_count || 0}</span>
+                </button>
+                <button
+                  onClick={() => handleReaction(vlog.id, 'dislike')}
+                  className={`flex items-center space-x-1 ${
+                    vlog.user_reaction === 'dislike' ? 'text-red-600' : 'text-gray-500 hover:text-red-600'
+                  }`}
+                >
+                  <ThumbsDown className="h-5 w-5" />
+                  <span>{vlog.dislike_count || 0}</span>
+                </button>
+                <button
+                  onClick={() => setShowComments({ ...showComments, [vlog.id]: !showComments[vlog.id] })}
+                  className="flex items-center space-x-1 text-gray-500 hover:text-gray-700"
+                >
+                  <MessageSquare className="h-5 w-5" />
+                  <span>{vlog.comments.length}</span>
+                </button>
+              </div>
+
+              {showComments[vlog.id] && (
+                <div className="mt-4 space-y-4">
+                  {vlog.comments.map((comment) => (
+                    <div key={comment.id} className="pl-4 border-l-2 border-gray-200">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-medium text-gray-900">
+                          {comment.author.username}
+                        </span>
+                        <span className="text-sm text-gray-500">
+                          {new Date(comment.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-gray-600">{comment.content}</p>
+                    </div>
+                  ))}
+
+                  <div className="mt-4 flex space-x-2">
+                    <input
+                      type="text"
+                      value={newComment[vlog.id] || ''}
+                      onChange={(e) => setNewComment({ ...newComment, [vlog.id]: e.target.value })}
+                      placeholder="Add a comment..."
+                      className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    />
+                    <button
+                      onClick={() => handleAddComment(vlog.id)}
+                      className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
+                    >
+                      Post
+                    </button>
+                  </div>
+                </div>
+              )}
                 <div>
                   By {vlog.author.username} ({vlog.author.role})
                 </div>

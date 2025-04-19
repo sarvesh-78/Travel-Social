@@ -166,23 +166,29 @@ export function Posts() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not logged in');
-
-      console.log('Deleting post with ID:', postId);
-
-      // Find the post in the array
+  
       const post = posts.find(p => p.id === postId);
       if (!post) throw new Error('Post not found');
-
-      // Check if the logged-in user is the author of the post
       if (post.author.id !== user.id) {
         throw new Error('You can only delete your own posts');
       }
-
-      // Delete the post from the posts table
-      const { error } = await supabase.from('posts').delete().eq('id', postId);
-      if (error) throw error;
-
-      // Refresh the list of posts after deletion
+  
+      // First delete comments
+      const { error: commentDeleteError } = await supabase
+        .from('comments')
+        .delete()
+        .eq('post_id', postId);
+  
+      if (commentDeleteError) throw commentDeleteError;
+  
+      // Then delete the post
+      const { error: postDeleteError } = await supabase
+        .from('posts')
+        .delete()
+        .eq('id', postId);
+  
+      if (postDeleteError) throw postDeleteError;
+  
       setPosts(posts.filter(p => p.id !== postId));
     } catch (error) {
       console.error('Error deleting post:', error);
