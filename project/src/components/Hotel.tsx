@@ -103,7 +103,6 @@ export function Hotel() {
         const geoRes = await fetch(`https://api.opentripmap.com/0.1/en/places/geoname?name=${fetchedCityName}&apikey=${OTM_API_KEY}`);
         if (!geoRes.ok) throw new Error('Failed to fetch city location');
         const geoData = await geoRes.json();
-        console.log('OpenTripMap Geo Response:', geoData); // Debugging log
         const { lat, lon } = geoData;
 
         if (!lat || !lon) {
@@ -155,19 +154,34 @@ export function Hotel() {
   }, [cityId]);
 
   const fetchHotels = async (offset = 0, limit = 10) => {
-    const hotelsRes = await fetch(
-      `https://api.opentripmap.com/0.1/en/places/radius?radius=5000&lon=${cityCoordinates?.lon}&lat=${cityCoordinates?.lat}&kinds=accomodations&limit=${limit}&offset=${offset}&rate=2&format=json&apikey=${OTM_API_KEY}`
-    );
-    const hotelsData = await hotelsRes.json();
-    const mappedHotels = hotelsData.map((hotel: any) => ({
-      xid: hotel.xid,
-      name: hotel.name || 'Unnamed Accommodation',
-      kinds: hotel.kinds || 'Unknown',
-      lat: hotel.point?.lat || null,
-      lon: hotel.point?.lon || null,
-    }));
-    setHotels((prev) => [...prev, ...mappedHotels]);
+    if (!cityCoordinates?.lat || !cityCoordinates?.lon) {
+      console.warn('cityCoordinates not available — skipping hotel fetch');
+      return;
+    }
+  
+    try {
+      const hotelsRes = await fetch(
+        `https://api.opentripmap.com/0.1/en/places/radius?radius=5000&lon=${cityCoordinates.lon}&lat=${cityCoordinates.lat}&kinds=accomodations&limit=${limit}&offset=${offset}&rate=2&format=json&apikey=${OTM_API_KEY}`
+      );
+  
+      if (!hotelsRes.ok) throw new Error('Failed to fetch hotels');
+  
+      const hotelsData = await hotelsRes.json();
+      const mappedHotels = hotelsData.map((hotel: any) => ({
+        xid: hotel.xid,
+        name: hotel.name || 'Unnamed Accommodation',
+        kinds: hotel.kinds || 'Unknown',
+        lat: hotel.point?.lat || null,
+        lon: hotel.point?.lon || null,
+      }));
+  
+      setHotels((prev) => [...prev, ...mappedHotels]);
+    } catch (err) {
+      console.error('Error fetching hotels:', err);
+      setError('Failed to fetch hotels');
+    }
   };
+  
 
   
           // const cachedResponse = localStorage.getItem(`booking_hotels_${city}`);

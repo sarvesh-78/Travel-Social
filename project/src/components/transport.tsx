@@ -1,17 +1,84 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import { supabase } from '../lib/supabase';
+
+// Predefined city-to-IATA mapping
+const cityToIataMap: Record<string, string> = {
+  Chennai: 'MAA',
+  Delhi: 'DEL',
+  Mumbai: 'BOM',
+  Bangalore: 'BLR',
+  Kolkata: 'CCU',
+  Hyderabad: 'HYD', // Example addition
+  Ahmedabad: 'AMD', // Example addition
+};
 
 const Transport = () => {
-  const [origin, setOrigin] = useState('');
-  const [destination, setDestination] = useState('MAA'); // Default example: Chennai
-  const [departureDate, setDepartureDate] = useState('');
+  const { cityId } = useParams<{ cityId: string }>(); // Get city ID from the URL
+  const [originCity, setOriginCity] = useState(''); // User input for origin city
+  const [destinationCity, setDestinationCity] = useState(''); // Fetched destination city name
+  const [originIata, setOriginIata] = useState(''); // Resolved IATA for origin city
+  const [destinationIata, setDestinationIata] = useState(''); // Resolved IATA for destination city
+  const [departureDate, setDepartureDate] = useState(''); // User input for departure date
   const [flights, setFlights] = useState([]);
   const [error, setError] = useState('');
-
   const exchangeRate = 82; // Example exchange rate: 1 USD = 82 INR
 
+  // Fetch destination city name based on cityId
+  useEffect(() => {
+    const fetchDestinationCity = async () => {
+      if (!cityId) {
+        setError('City ID is missing in the URL.');
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('cities') // Ensure you have a 'cities' table
+          .select('name')
+          .eq('id', cityId)
+          .single();
+
+        if (error) throw error;
+
+        const fetchedCityName = data.name;
+        setDestinationCity(fetchedCityName);
+
+        const iataCode = cityToIataMap[fetchedCityName]; // Map city name to IATA code
+        if (iataCode) {
+          setDestinationIata(iataCode);
+        } else {
+          setError(`IATA code not found for the city "${fetchedCityName}".`);
+        }
+      } catch (err) {
+        console.error('Error fetching destination city from Supabase:', err);
+        setError('Failed to fetch destination city. Please try again later.');
+      }
+    };
+
+    fetchDestinationCity();
+  }, [cityId]);
+
+  // Update origin IATA code when origin city is entered
+  useEffect(() => {
+    if (originCity) {
+      const formattedCity = originCity.trim().toLowerCase(); // Convert the entire input to lowercase
+      const properFormattedCity =
+        formattedCity.charAt(0).toUpperCase() + formattedCity.slice(1); // Capitalize the first letter
+      const iataCode = cityToIataMap[properFormattedCity]; // Match with the mapping
+      if (iataCode) {
+        setOriginIata(iataCode); // Set IATA code
+        setError(''); // Clear any previous error
+      } else {
+        console.error(`IATA code not found for the city "${properFormattedCity}".`);
+        setError(`IATA code not found for the city "${properFormattedCity}".`);
+      }
+    }
+  }, [originCity]);
+
   const searchFlights = async () => {
-    const cacheKey = `${origin}-${destination}-${departureDate}`;
+    const cacheKey = `${originIata}-${destinationIata}-${departureDate}`;
     const cachedData = JSON.parse(localStorage.getItem(cacheKey) || 'null');
 
     if (cachedData && Date.now() - cachedData.timestamp < 5 * 60 * 1000) {
@@ -20,12 +87,8 @@ const Transport = () => {
       return;
     }
 
-    if (!origin || !destination || !departureDate) {
+    if (!originIata || !destinationIata || !departureDate) {
       setError('Please provide valid origin, destination, and departure date.');
-      return;
-    }
-    if (!/^[A-Z]{3}$/.test(origin) || !/^[A-Z]{3}$/.test(destination)) {
-      setError('Origin and destination must be valid IATA codes.');
       return;
     }
     if (new Date(departureDate) <= new Date()) {
@@ -38,8 +101,8 @@ const Transport = () => {
         method: 'GET',
         url: `https://sky-scanner3.p.rapidapi.com/google/flights/search-one-way`,
         params: {
-          departureId: origin, // Use the origin IATA code
-          arrivalId: destination, // Use the destination IATA code
+          departureId: originIata, // Use the origin IATA code
+          arrivalId: destinationIata, // Use the destination IATA code
           departureDate, // Use the departure date
         },
         headers: {
@@ -77,18 +140,19 @@ const Transport = () => {
   return (
     <div className="p-4">
       <h1 className="text-xl font-bold mb-4">Search Flights</h1>
+      <div className="mb-4">
+        <p>
+          <strong>Destination City:</strong> {destinationCity || 'Fetching...'}
+        </p>
+        <p>
+          <strong>Destination IATA Code:</strong> {destinationIata || 'Fetching...'}
+        </p>
+      </div>
       <input
         type="text"
-        placeholder="Origin IATA (e.g. DEL)"
-        value={origin}
-        onChange={(e) => setOrigin(e.target.value)}
-        className="border p-2 mr-2"
-      />
-      <input
-        type="text"
-        placeholder="Destination IATA (e.g. MAA)"
-        value={destination}
-        onChange={(e) => setDestination(e.target.value)}
+        placeholder="Origin City (e.g. Delhi)"
+        value={originCity}
+        onChange={(e) => setOriginCity(e.target.value)}
         className="border p-2 mr-2"
       />
       <input

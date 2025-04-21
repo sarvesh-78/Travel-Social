@@ -36,7 +36,7 @@ export function Matches() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
+  
       const { data, error } = await supabase
         .from('profiles')
         .select(`
@@ -45,7 +45,7 @@ export function Matches() {
         `)
         .eq('id', user.id)
         .single();
-
+  
       if (error) throw error;
       setCurrentUser(data);
     } catch (error) {
@@ -55,42 +55,93 @@ export function Matches() {
 
   async function fetchMatches() {
     if (!currentUser) return;
-
+  
     try {
-      let query = supabase
+      setLoading(true);
+  
+      // Step 1: Get city IDs that the current user has joined
+      const { data: userCities, error: userCitiesError } = await supabase
+        .from('city_members')
+        .select('city_id')
+        .eq('profile_id', currentUser.id);
+  
+      if (userCitiesError) {
+        console.error('Error fetching user city memberships:', userCitiesError);
+        throw userCitiesError;
+      }
+  
+      const cityIds = userCities.map((entry) => entry.city_id);
+  
+      if (cityIds.length === 0) {
+        console.log('User has not joined any cities.');
+        setMatches([]);
+        return;
+      }
+  
+      let matchingMemberIds: Set<string> = new Set();
+  
+      // Step 2: Get members from each city except current user
+      for (const cityId of cityIds) {
+        const { data: cityMembers, error: cityMembersError } = await supabase
+          .from('city_members')
+          .select('profile_id')
+          .eq('city_id', cityId);
+  
+        if (cityMembersError) {
+          console.error(`Error fetching members for city ${cityId}:`, cityMembersError);
+          throw cityMembersError;
+        }
+  
+        cityMembers?.forEach(({ profile_id }) => {
+          if (profile_id !== currentUser.id) {
+            matchingMemberIds.add(profile_id);
+          }
+        });
+      }
+  
+      if (matchingMemberIds.size === 0) {
+        console.log('No matching members found.');
+        setMatches([]);
+        return;
+      }
+  
+      const memberIdsArray = Array.from(matchingMemberIds);
+  
+      // Step 3: Fetch full profiles for matching users
+      const { data: matchingProfiles, error: profilesError } = await supabase
         .from('profiles')
         .select(`
           *,
           city:cities(name, country)
         `)
-        .neq('id', currentUser.id);
-
-      // Only add city_id filter if user has a city
-      if (currentUser.city_id) {
-        query = query.eq('city_id', currentUser.city_id);
+        .in('id', memberIdsArray);
+  
+      if (profilesError) {
+        console.error('Error fetching profiles:', profilesError);
+        throw profilesError;
       }
-
-      // Add interests filter only if user has interests
-      if (currentUser.interests && currentUser.interests.length > 0) {
-        if (currentUser.city_id) {
-          // If we have both city and interests, use OR condition
-          query = query.or(`city_id.eq.${currentUser.city_id},interests.overlaps.{${currentUser.interests.map(i => `"${i}"`).join(',')}}`);
-        } else {
-          // If we only have interests, just filter by interests
-          query = query.overlaps('interests', currentUser.interests);
-        }
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setMatches(data || []);
+      setMatches(matchingProfiles || []);
     } catch (error) {
       console.error('Error fetching matches:', error);
+      setMatches([]);
     } finally {
       setLoading(false);
     }
   }
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
 
   async function handleStartChat(matchId: string) {
     try {
@@ -150,9 +201,6 @@ export function Matches() {
                   <h3 className="text-xl font-semibold text-gray-900">
                     {match.username}
                   </h3>
-                  <p className="text-sm text-gray-500">
-                    {match.role.charAt(0).toUpperCase() + match.role.slice(1)}
-                  </p>
                 </div>
                 <button
                   onClick={() => handleStartChat(match.id)}

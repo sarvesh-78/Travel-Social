@@ -9,7 +9,7 @@ interface ProfileProps {
 interface UserProfile {
   username: string;
   bio: string;
-  role: 'resident' | 'traveler';
+  role: 'Local Guide' | 'Nomad';
   city_id: string | null;
 }
 
@@ -25,7 +25,7 @@ export function Profile({ user }: ProfileProps) {
   const [profile, setProfile] = useState<UserProfile>({
     username: '',
     bio: '',
-    role: 'traveler',
+    role: 'Nomad',
     city_id: null,
   });
   const [error, setError] = useState<string | null>(null);
@@ -43,10 +43,9 @@ export function Profile({ user }: ProfileProps) {
         .eq('id', user.id)
         .single();
 
-      if (error && error.code !== 'PGRST116') { // PGRST116 is the error code for no rows returned
+      if (error && error.code !== 'PGRST116') {
         throw error;
       }
-
       if (data) {
         setProfile(data);
       }
@@ -63,7 +62,6 @@ export function Profile({ user }: ProfileProps) {
         .from('cities')
         .select('id, name, country')
         .order('name');
-
       if (error) throw error;
       setCities(data || []);
     } catch (error) {
@@ -76,13 +74,11 @@ export function Profile({ user }: ProfileProps) {
     setError(null);
 
     try {
-      // Validate username
       if (!profile.username.trim()) {
         setError('Username is required');
         return;
       }
 
-      // Check if username is already taken (excluding current user)
       const { data: existingUser, error: checkError } = await supabase
         .from('profiles')
         .select('id')
@@ -93,25 +89,24 @@ export function Profile({ user }: ProfileProps) {
       if (checkError && checkError.code !== 'PGRST116') {
         throw checkError;
       }
-
       if (existingUser) {
         setError('Username is already taken');
         return;
       }
 
-      // Update or create profile
       const { error: upsertError } = await supabase
         .from('profiles')
-        .upsert({
-          id: user.id,
-          username: profile.username.trim(),
-          bio: profile.bio.trim(),
-          role: profile.role,
-          city_id: profile.role === 'resident' ? profile.city_id : null,
-          created_at: new Date().toISOString(),
-        }, {
-          onConflict: 'id'
-        });
+        .upsert(
+          {
+            id: user.id,
+            username: profile.username.trim(),
+            bio: profile.bio.trim(),
+            role: profile.role,
+            city_id: profile.city_id,
+            created_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' }
+        );
 
       if (upsertError) throw upsertError;
 
@@ -135,7 +130,7 @@ export function Profile({ user }: ProfileProps) {
             {error}
           </div>
         )}
-        
+
         <div>
           <label className="block text-sm font-medium text-gray-700">Username</label>
           <input
@@ -161,31 +156,29 @@ export function Profile({ user }: ProfileProps) {
           <label className="block text-sm font-medium text-gray-700">Role</label>
           <select
             value={profile.role}
-            onChange={(e) => setProfile({ ...profile, role: e.target.value as 'resident' | 'traveler' })}
+            onChange={(e) => setProfile({ ...profile, role: e.target.value as UserProfile['role'] })}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
           >
-            <option value="traveler">Traveler</option>
-            <option value="resident">Resident</option>
+            <option value="Local Guide">Local Guide</option>
+            <option value="Nomad">Nomad</option>
           </select>
         </div>
 
-        {profile.role === 'resident' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700">City of Residence</label>
-            <select
-              value={profile.city_id || ''}
-              onChange={(e) => setProfile({ ...profile, city_id: e.target.value || null })}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-            >
-              <option value="">Select a city</option>
-              {cities.map((city) => (
-                <option key={city.id} value={city.id}>
-                  {city.name}, {city.country}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div>
+          <label className="block text-sm font-medium text-gray-700">City</label>
+          <select
+            value={profile.city_id || ''}
+            onChange={(e) => setProfile({ ...profile, city_id: e.target.value || null })}
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+          >
+            <option value="">Select a city</option>
+            {cities.map((city) => (
+              <option key={city.id} value={city.id}>
+                {city.name}, {city.country}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="flex justify-end">
           <button
