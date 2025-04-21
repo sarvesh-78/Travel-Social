@@ -9,6 +9,8 @@ import { Hotel } from './components/Hotel';
 import { TravelPlans } from './components/TravelPlans';
 import { TravelVlogs } from './components/TravelVlogs';
 import Transport from './components/transport.tsx';
+import { Matches } from './components/Matches';
+import { Chat } from './components/Chat';
 import { Profile } from './components/Profile';
 import { supabase } from './lib/supabase';
 import { User } from '@supabase/supabase-js';
@@ -87,7 +89,14 @@ function App() {
               path="/cities/:cityId/transport"
               element={user ? <Transport /> : <Navigate to="/" replace />}
             />
-
+            <Route
+              path="/matches"
+              element={user ? <Matches /> : <Navigate to="/" replace />}
+            />
+            <Route
+              path="/chat/:chatId"
+              element={user ? <Chat /> : <Navigate to="/" replace />}
+            />
             <Route
               path="/profile"
               element={user ? <Profile user={user} /> : <Navigate to="/" replace />}

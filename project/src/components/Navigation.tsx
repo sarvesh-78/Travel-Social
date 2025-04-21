@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { User } from '@supabase/supabase-js';
-import { Home, User as UserIcon, Calendar, Map, Video, Building } from 'lucide-react';
+import { Home, User as UserIcon, Calendar, Map, Video, Building,Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface NavigationProps {
@@ -41,6 +41,17 @@ export function Navigation({ user }: NavigationProps) {
             >
               <Video className="h-5 w-5 mr-2" />
               <span className="font-medium">Travel Vlogs</span>
+            </Link>
+            <Link
+              to="/matches"
+              className={`flex items-center px-4 ${
+                location.pathname === '/matches'
+                  ? 'text-indigo-600'
+                  : 'text-gray-700 hover:text-indigo-600'
+              }`}
+            >
+              <Users className="h-5 w-5 mr-2" />
+              <span className="font-medium">Find Buddies</span>
             </Link>
 
             {cityId && (
